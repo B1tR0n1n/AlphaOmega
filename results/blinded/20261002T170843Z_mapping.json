@@ -1,0 +1,15 @@
+{
+  "timestamp": "20261002T170843Z",
+  "arm_to_code": {
+    "axiom_arch": "C",
+    "axiom_naive": "A",
+    "creed": "D",
+    "neutral": "B"
+  },
+  "code_to_arm": {
+    "C": "axiom_arch",
+    "A": "axiom_naive",
+    "D": "creed",
+    "B": "neutral"
+  }
+}

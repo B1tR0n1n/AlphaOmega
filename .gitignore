@@ -1,6 +1,4 @@
 .env
-results/runs/
-results/blinded/
 __pycache__/
 *.pyc
 .venv/
