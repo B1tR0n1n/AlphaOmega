@@ -1,4 +1,7 @@
-"""OpenAI (GPT-4o / GPT-5) backend. Mirrors AnthropicProvider."""
+"""OpenAI (GPT-4o / GPT-5) backend. Mirrors AnthropicProvider.
+
+Also drives any OpenAI-compatible server (llama-server, vLLM) via `base_url`.
+"""
 
 import os
 from functools import cached_property
@@ -18,14 +21,21 @@ class OpenAIProvider:
     prefixes, no cache_control block needed.
     """
 
-    def __init__(self, model: str = "gpt-4o", api_key: str | None = None):
+    def __init__(
+        self,
+        model: str = "gpt-4o",
+        api_key: str | None = None,
+        base_url: str | None = None,
+    ):
         self.model = model
-        self.name = f"openai:{model}"
-        self._api_key = api_key or os.environ.get("OPENAI_API_KEY")
+        self._base_url = base_url
+        self.name = f"local:{model}" if base_url else f"openai:{model}"
+        # Local servers don't check the key, but the client refuses to start without one.
+        self._api_key = api_key or os.environ.get("OPENAI_API_KEY") or ("local" if base_url else None)
 
     @cached_property
     def _client(self) -> "openai.OpenAI":
-        return openai.OpenAI(api_key=self._api_key)
+        return openai.OpenAI(api_key=self._api_key, base_url=self._base_url)
 
     def complete(
         self,

@@ -6,7 +6,8 @@ Usage:
     python analysis/pairwise_report.py results/pairwise/<ts>_pairwise_<judge>.jsonl [more.jsonl ...]
 
 Pass several files to pool runs (e.g. Opus + Haiku) — each run is also
-reported on its own.
+reported on its own. Files from different judges are reported per judge,
+followed by an inter-judge agreement check.
 """
 
 import json
@@ -41,7 +42,7 @@ def load_records(paths: list[Path]) -> list[dict]:
                     continue
                 rec = json.loads(line)
                 if rec.get("picks"):
-                    latest[(rec["timestamp"], rec["key"])] = rec
+                    latest[(rec["judge"], rec["timestamp"], rec["key"])] = rec
 
     for rec in latest.values():
         ts = rec["timestamp"]
@@ -59,10 +60,10 @@ def resolve_pairs(records: list[dict]) -> list[dict]:
     grouped: dict[tuple, list[dict]] = defaultdict(list)
     for rec in records:
         pair = tuple(sorted((rec["first_arm"], rec["second_arm"])))
-        grouped[(rec["timestamp"], rec["gen_model"], rec["case_id"], pair)].append(rec)
+        grouped[(rec["judge"], rec["timestamp"], rec["gen_model"], rec["case_id"], pair)].append(rec)
 
     outcomes = []
-    for (ts, model, case_id, pair), recs in grouped.items():
+    for (judge, ts, model, case_id, pair), recs in grouped.items():
         if len(recs) != 2:
             continue  # one order missing — incomplete, skip
         winners = {}
@@ -71,7 +72,7 @@ def resolve_pairs(records: list[dict]) -> list[dict]:
             winners[d] = a if a == b else None  # disagreement across orders = tie
         lens = {recs[0]["first_arm"]: recs[0]["len_first"],
                 recs[0]["second_arm"]: recs[0]["len_second"]}
-        outcomes.append({"ts": ts, "model": model, "case_id": case_id,
+        outcomes.append({"judge": judge, "ts": ts, "model": model, "case_id": case_id,
                          "pair": pair, "winners": winners, "lens": lens})
     return outcomes
 
@@ -119,6 +120,25 @@ def print_diagnostics(records: list[dict], outcomes: list[dict]) -> None:
         print(f"    {arm:<14}{sum(vals) / len(vals):>8.0f}")
 
 
+def print_judge_agreement(outcomes: list[dict]) -> None:
+    """How often two judges reach the same verdict on the same matchup."""
+    judges = sorted({o["judge"] for o in outcomes})
+    by_key: dict[tuple, dict[str, dict]] = defaultdict(dict)
+    for o in outcomes:
+        by_key[(o["ts"], o["case_id"], o["pair"])][o["judge"]] = o
+
+    print("\n══ INTER-JUDGE AGREEMENT " + "═" * 36)
+    for j1, j2 in combinations(judges, 2):
+        shared = [v for v in by_key.values() if j1 in v and j2 in v]
+        print(f"  {j1} vs {j2}  ({len(shared)} shared matchups)")
+        for dim in DIMS:
+            both = [(v[j1]["winners"][dim], v[j2]["winners"][dim]) for v in shared
+                    if v[j1]["winners"][dim] and v[j2]["winners"][dim]]
+            agree = sum(a == b for a, b in both)
+            pct = 100 * agree / len(both) if both else 0.0
+            print(f"    {dim:<12} agree {agree}/{len(both)} ({pct:.0f}%) where both decided")
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__)
@@ -129,12 +149,19 @@ def main():
     print("W/L = consistent wins across both presentation orders. "
           "T = judge flipped with order. p = exact two-sided sign test (ties excluded).")
 
-    models = sorted({o["model"] for o in outcomes})
-    for model in models:
-        print_head_to_head([o for o in outcomes if o["model"] == model], model)
-    if len(models) > 1:
-        print_head_to_head(outcomes, "POOLED: " + " + ".join(models))
-    print_diagnostics(records, outcomes)
+    judges = sorted({o["judge"] for o in outcomes})
+    for judge in judges:
+        j_out = [o for o in outcomes if o["judge"] == judge]
+        j_rec = [r for r in records if r["judge"] == judge]
+        print(f"\n\n#################### JUDGE: {judge} ####################")
+        models = sorted({o["model"] for o in j_out})
+        for model in models:
+            print_head_to_head([o for o in j_out if o["model"] == model], model)
+        if len(models) > 1:
+            print_head_to_head(j_out, "POOLED: " + " + ".join(models))
+        print_diagnostics(j_rec, j_out)
+    if len(judges) > 1:
+        print_judge_agreement(outcomes)
 
 
 if __name__ == "__main__":

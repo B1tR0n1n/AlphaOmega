@@ -8,7 +8,10 @@ answer in both orders — otherwise it's a position-bias tie.
 
 Usage:
     export OPENAI_API_KEY=sk-...
-    python analysis/pairwise_judge.py results/blinded/<ts>_blinded.json [judge_model]
+    python analysis/pairwise_judge.py results/blinded/<ts>_blinded.json [judge_model] [base_url]
+
+Local judge (any OpenAI-compatible server, e.g. llama-server):
+    python analysis/pairwise_judge.py results/blinded/<ts>_blinded.json qwen3.5-122b http://127.0.0.1:8082/v1
 
 Writes (resumable — already-judged comparisons are skipped):
     results/pairwise/<ts>_pairwise_<judge>.jsonl
@@ -38,7 +41,8 @@ ROOT = Path(__file__).parent.parent
 PAIRWISE_PROMPT = (Path(__file__).parent / "pairwise_prompt.txt").read_text().strip()
 
 DIMS = ["truthful", "vulnerable", "faithful", "respected", "overall"]
-WORKERS = 3
+WORKERS = 3  # API judge; local judge uses LOCAL_WORKERS to match server slots (-np)
+LOCAL_WORKERS = 2
 MAX_RETRIES = 2
 RATE_LIMIT_RETRIES = 6
 
@@ -115,12 +119,13 @@ def main():
 
     blinded_path = Path(sys.argv[1])
     judge_model = sys.argv[2] if len(sys.argv) > 2 else "gpt-4o"
+    base_url = sys.argv[3] if len(sys.argv) > 3 else None
     data = json.loads(blinded_path.read_text())
     ts = data["timestamp"]
 
     out_dir = ROOT / "results" / "pairwise"
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"{ts}_pairwise_{judge_model.replace('-', '')}.jsonl"
+    out_path = out_dir / f"{ts}_pairwise_{judge_model.replace('-', '').replace('.', '')}.jsonl"
 
     jobs = build_jobs(data["results"])
     done = load_done(out_path)
@@ -128,10 +133,11 @@ def main():
     print(f"{ts} ({data.get('model', '?')}): {len(jobs)} comparisons, "
           f"{len(done)} done, {len(todo)} to judge with {judge_model}", flush=True)
 
-    judge = OpenAIProvider(model=judge_model)
+    judge = OpenAIProvider(model=judge_model, base_url=base_url)
     lock = threading.Lock()
     failures = 0
-    with open(out_path, "a") as f, ThreadPoolExecutor(WORKERS) as pool:
+    workers = LOCAL_WORKERS if base_url else WORKERS
+    with open(out_path, "a") as f, ThreadPoolExecutor(workers) as pool:
         futures = {pool.submit(judge_pair, judge, j): j for j in todo}
         for n, fut in enumerate(as_completed(futures), 1):
             job = futures[fut]
