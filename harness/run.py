@@ -15,6 +15,11 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+# Force line-buffered stdout so progress is visible when piped to tee/log.
+# Without this, Python block-buffers through pipes and the user sees nothing
+# until the whole run completes.
+sys.stdout.reconfigure(line_buffering=True)
+
 # Repo-root import of the alphaomega package
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
